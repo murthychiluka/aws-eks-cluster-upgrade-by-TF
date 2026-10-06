@@ -327,3 +327,245 @@ essentially means:
 One important interview point
 
 The exact terminology/configuration differs slightly between EKS, AKS, and GKE. For example, AWS EKS managed node groups expose maxUnavailable/updateConfig, while AKS and GKE have their own surge-upgrade settings. So if an interviewer asks specifically about your implementation, describe the setting you actually configured rather than implying the same parameter was used on all three platforms.
+
+************************************
+as of October 2026, EKS has Kubernetes 1.37 available, and AWS currently lists 1.34–1.37 in standard support and older versions such as 1.31–1.33 in extended support. AWS Documentation
+# 1. What is an EKS version upgrade?
+An EKS version upgrade means moving your Kubernetes cluster from one minor Kubernetes version to a newer supported version.
+For example:
+EKS 1.35
+   ↓
+EKS 1.36
+
+or:
+EKS 1.36
+   ↓
+EKS 1.37
+
+It involves more than simply changing a version number. You need to consider:
+- Control plane
+- Worker nodes / managed node groups
+- EKS add-ons
+- Kubernetes APIs and deprecated resources
+- Controllers such as AWS Load Balancer Controller
+- Cluster Autoscaler / Karpenter
+- CSI drivers
+- kubectl
+- Application compatibility
+AWS specifically recommends checking upgrade insights and deprecated API usage before upgrading. AWS Documentation
+# 2. What are the components involved in an EKS upgrade?
+Think about an EKS cluster like this:
+                    EKS Cluster
+                        |
+          +-------------+-------------+
+          |                           |
+    CONTROL PLANE                 DATA PLANE
+    Managed by AWS                Managed by you
+          |                           |
+    API Server                 Managed Node Groups
+    Scheduler                 Self-managed Nodes
+    etcd                      Fargate
+                                      |
+                                    Pods
+          |
+    EKS Add-ons
+    ├── VPC CNI
+    ├── CoreDNS
+    └── kube-proxy
+
+During an upgrade, you normally consider:
+# 1. Control Plane
+AWS-managed:
+API Server
+Scheduler
+Controller Manager
+etcd
+
+You initiate the Kubernetes version upgrade, but AWS performs the control-plane infrastructure update.
+# 2. Worker Nodes
+Examples:
+Managed Node Group
+Self-managed EC2 nodes
+Fargate
+
+These need to be brought to a compatible Kubernetes version.
+# 3. EKS Add-ons
+Important examples:
+VPC CNI
+CoreDNS
+kube-proxy
+EBS CSI Driver
+
+AWS recommends updating the relevant add-ons after the control plane upgrade. AWS Documentation
+# 4. Kubernetes applications/controllers
+For example:
+AWS Load Balancer Controller
+Cluster Autoscaler
+Karpenter
+Metrics Server
+Ingress controllers
+CSI drivers
+
+You need to verify that their versions support the new Kubernetes version.
+5. Application manifests
+You need to check for:
+Deprecated APIs
+Removed APIs
+Deprecated CRDs
+Old Helm charts
+Old Kubernetes manifests
+
+This is one of the major reasons an upgrade can fail even when the EKS infrastructure itself is healthy.
+# 3. Control Plane vs Node Group upgrade
+This is a very important interview distinction.
+Control Plane Upgrade	Node Group Upgrade
+Managed by AWS	Managed by you/AWS depending on node type
+Upgrades Kubernetes API server/control-plane components	Upgrades worker node kubelet/AMI
+Does not directly upgrade your EC2 nodes	Replaces/upgrades worker nodes
+Initiated through EKS	Managed node groups can be updated through EKS
+Happens first	Normally follows control-plane upgrade
+Applications continue running during the control-plane update	Pods are gradually drained/rescheduled
+
+
+Simple example
+Current cluster:
+Control Plane → 1.35
+
+Node Group
+├── Node 1 → 1.35
+├── Node 2 → 1.35
+└── Node 3 → 1.35
+
+You want 1.36.
+Step 1 — Control Plane
+Control Plane → 1.36
+
+Nodes → still 1.35
+
+Then:
+Step 2 — Node Group
+Control Plane → 1.36
+
+Node 1 → 1.36
+Node 2 → 1.36
+Node 3 → 1.36
+
+AWS's documented upgrade flow is essentially control plane → nodes → add-ons/components. AWS Documentation
+4. Is EKS control-plane upgrade automatic or manual?
+The upgrade is initiated by you, but AWS performs the actual control-plane upgrade.
+For example:
+eksctl upgrade cluster \
+  --name my-cluster \
+  --version 1.36 \
+  --approve
+
+Or using AWS CLI:
+aws eks update-cluster-version \
+  --name my-cluster \
+  --kubernetes-version 1.36 \
+  --region us-east-1
+
+AWS then performs the control-plane replacement/rolling update. AWS Documentation
+So in an interview, say:
+"EKS control-plane upgrades are customer-initiated but AWS-managed. We select the target Kubernetes version, and EKS handles the underlying control-plane upgrade."
+
+That's a good answer.
+Important distinction
+AWS does have automatic version movement in some lifecycle situations.
+For example, if a cluster reaches the end of its extended-support period without being upgraded, EKS automatically moves it to the oldest currently supported version. 
+So don't simply say:
+"EKS upgrades automatically."
+
+Instead say:
+"Normal version upgrades are initiated by the customer; AWS manages the control-plane upgrade process. Automatic version movement can occur when a version reaches the end of its extended-support lifecycle."
+
+5. What is the current Kubernetes version supported by EKS?
+As of October 6, 2026, the latest Kubernetes version available on EKS is:
+Kubernetes 1.37
+AWS added EKS 1.37 on October 1, 2026. AWS Documentation
+AWS currently lists:
+Standard Support
+----------------
+1.37
+1.36
+1.35
+1.34
+
+Extended Support
+----------------
+1.33
+1.32
+1.31
+``` :chatgpt-content-reference{index="7"}
+
+
+For an interview, however, I'd phrase it carefully:
+
+> **"The latest EKS version currently available is 1.37. EKS supports multiple Kubernetes versions simultaneously under standard and extended support."**
+
+That is better than memorizing only one version because AWS releases new Kubernetes versions regularly.
+
+---
+
+# 6. Can we skip Kubernetes versions while upgrading?
+
+### **No — for EKS control-plane upgrades, you should upgrade one minor version at a time.**
+
+For example:
+
+```text
+1.35 → 1.36 → 1.37
+
+You cannot normally do:
+1.35 → 1.37
+
+AWS explicitly states that EKS allows only one minor version at a time for control-plane upgrades. AWS Documentation
+Example
+Suppose your production cluster is:
+1.34
+
+and you want:
+1.37
+
+You need:
+1.34
+  ↓
+1.35
+  ↓
+1.36
+  ↓
+1.37
+
+And after each control-plane upgrade, you should bring the node groups/components into the appropriate supported state before proceeding.
+7. One important interview nuance
+You might hear someone say:
+"Kubernetes supports version skew, so I can skip versions."
+
+There is some truth here, but don't confuse version skew with skipping EKS control-plane upgrades.
+For example:
+Control Plane = 1.36
+Node = 1.35
+
+There are supported periods where nodes can temporarily be one or more minor versions behind the API server. AWS documents specific version-skew allowances. AWS Documentation
+But that doesn't mean:
+EKS Control Plane 1.35
+        ↓
+        1.37
+
+is supported.
+Think of these as two different concepts:
+VERSION SKEW
+     ↓
+Temporary difference between
+control plane and nodes
+
+VERSION UPGRADE
+     ↓
+Moving EKS control plane
+from 1.x → 1.x+1
+
+⭐ Easy interview answer to remember
+If the interviewer asks "Explain your EKS upgrade strategy", you can answer:
+"We follow a controlled, one-minor-version-at-a-time upgrade strategy. First, we review EKS upgrade insights, deprecated APIs, add-on and controller compatibility. We upgrade the EKS control plane first, which is managed by AWS, then upgrade the managed node groups using a rolling/surge strategy with Pod Disruption Budgets to maintain availability. Finally, we update EKS add-ons such as VPC CNI, CoreDNS and kube-proxy, validate workloads, and perform post-upgrade health checks." AWS Documentation
+
+One useful 2026-specific addition for your interviews: EKS now has version rollback, allowing a control-plane upgrade to be rolled back to the previous minor version within 7 days if issues are discovered; this is a newer capability announced by AWS in July 2026.
