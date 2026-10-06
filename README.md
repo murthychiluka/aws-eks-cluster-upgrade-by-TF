@@ -353,6 +353,7 @@ It involves more than simply changing a version number. You need to consider:
 - kubectl
 - Application compatibility
 AWS specifically recommends checking upgrade insights and deprecated API usage before upgrading. AWS Documentation
+
 # 2. What are the components involved in an EKS upgrade?
 Think about an EKS cluster like this:
                     EKS Cluster
