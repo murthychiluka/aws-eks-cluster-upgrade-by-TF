@@ -34,7 +34,7 @@ module "eks" {
   instance_size         = var.instance_size
   cluster_name          = var.cluster_name
   worker_node_count     = var.instance_count
-  image_id              = var.ami_id
+  # image_id              = var.ami_id
   cluster_version       = var.cluster_version
   vpc-cni-version       = var.vpc-cni-version
   kube-proxy-version    = var.kube-proxy-version

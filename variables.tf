@@ -29,9 +29,9 @@ variable "instance_count" {
 }
 
 # AMI ID
-variable "ami_id" {
-  type = string
-}
+# variable "ami_id" {
+#   type = string
+# }
 
 # Cluster Version
 variable "cluster_version" {

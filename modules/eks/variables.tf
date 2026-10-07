@@ -59,10 +59,10 @@ variable "worker_node_count" {
 }
 
 # AMI ID
-variable "image_id" {
-  type        = string
-  description = "AMI ID"
-}
+# variable "image_id" {
+#   type        = string
+#   description = "AMI ID"
+# }
 
 # Cluster Version
 variable "cluster_version" {

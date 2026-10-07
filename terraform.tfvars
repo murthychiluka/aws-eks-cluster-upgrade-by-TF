@@ -20,6 +20,6 @@ region             = "us-east-1"
 
 
 cluster_version    ="1.32"                   
-ami_id             = "ami-00b2d535b557faf22"    
+#ami_id             = "ami-00b2d535b557faf22"    
 vpc-cni-version    = "v1.21.1-eksbuild.3"
 kube-proxy-version = "v1.32.11-eksbuild.5"
