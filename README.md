@@ -570,3 +570,400 @@ If the interviewer asks "Explain your EKS upgrade strategy", you can answer:
 "We follow a controlled, one-minor-version-at-a-time upgrade strategy. First, we review EKS upgrade insights, deprecated APIs, add-on and controller compatibility. We upgrade the EKS control plane first, which is managed by AWS, then upgrade the managed node groups using a rolling/surge strategy with Pod Disruption Budgets to maintain availability. Finally, we update EKS add-ons such as VPC CNI, CoreDNS and kube-proxy, validate workloads, and perform post-upgrade health checks." AWS Documentation
 
 One useful 2026-specific addition for your interviews: EKS now has version rollback, allowing a control-plane upgrade to be rolled back to the previous minor version within 7 days if issues are discovered; this is a newer capability announced by AWS in July 2026.
+*************************************************
+
+thanks for the guidance ,everything works fine. Could you please give the major pointers for future reference
+
+Absolutely 👍. You completed a full EKS 1.32 → 1.33 upgrade successfully. Here are the major points I'd keep as your future reference/interview notes.
+EKS Version Upgrade — Major Pointers
+1. EKS upgrade has multiple layers
+
+Don't think of an EKS upgrade as only upgrading the cluster version.
+EKS Upgrade
+│
+├── 1. Control Plane
+│       1.32 → 1.33
+│
+├── 2. Managed Node Group
+│       1.32 → 1.33
+│
+├── 3. EKS Add-ons
+│       ├── kube-proxy
+│       └── VPC CNI
+│
+└── 4. Application verification
+2. Recommended upgrade sequence
+
+For your lab, we followed:
+1. Check current cluster
+       ↓
+2. Upgrade Control Plane
+       ↓
+3. Upgrade Worker Node Group
+       ↓
+4. Upgrade kube-proxy
+       ↓
+5. Upgrade VPC CNI
+       ↓
+6. Verify nodes and workloads
+
+This is a good sequence to remember.
+3. Control Plane upgrade
+
+You upgraded:
+1.32 → 1.33
+
+Important point:
+
+    The EKS control plane is managed by AWS. You don't manage its EC2 instances or AMIs.
+
+After upgrading the control plane, the worker nodes can temporarily remain on the previous Kubernetes version.
+Control Plane    1.33
+Worker Nodes     1.32
+
+This intermediate state is expected while you perform the node upgrade.
+4. Worker Node Group upgrade
+
+Your managed node group went:
+1.32.13
+    ↓
+1.33.13
+
+You selected:
+
+Rolling update
+
+During the upgrade you actually saw:
+1.33 node    Ready
+1.33 node    Ready
+1.32 node    SchedulingDisabled
+
+This was an excellent demonstration of how a rolling update works.
+Important terms
+
+Cordon
+SchedulingDisabled
+
+means:
+
+    Don't schedule new Pods on this node.
+
+Drain
+
+Existing Pods are safely evicted/moved from the node.
+
+Rolling update
+
+New nodes are created and old nodes are gradually removed.
+5. AMI handling
+
+This is an important lesson from your Terraform setup.
+
+You originally had a manually specified AMI:
+image_id = var.image_id
+
+We changed to:
+ami_type = "AL2023_x86_64_STANDARD"
+
+Therefore, you don't have to manually search for an AMI ID every time.
+
+EKS selects the appropriate EKS-optimized AMI/release.
+
+Your node release became:
+1.33.13-20260930
+Interview answer
+
+    "For EKS managed node groups, I prefer the EKS-managed AL2023 AMI type so that the compatible EKS-optimized AMI release is managed by AWS instead of hard-coding an AMI ID."
+
+6. Scaling configuration vs PDB
+
+This was one of your good questions.
+
+You had:
+min_size     = 1
+desired_size = 2
+max_size     = 7
+
+This controls worker nodes, not Pods.
+min = 1
+desired = 2
+max = 7
+PDB is different
+
+PDB = PodDisruptionBudget
+
+It protects application Pod availability during voluntary disruptions.
+
+Example:
+
+minAvailable: 2
+
+means:
+
+    Keep at least 2 application Pods available during a voluntary disruption.
+
+Remember:
+Node Group Scaling
+        ↓
+Number of EC2 worker nodes
+
+PDB
+        ↓
+Number of application Pods that should remain available
+
+They solve different problems.
+7. PDB is not automatically created for your application
+
+You checked:
+
+kubectl get pdb -A
+
+and found:
+kube-system   coredns
+
+That was the CoreDNS PDB.
+
+Your application did not automatically get one.
+
+For production workloads, you can create your own PDB for important applications.
+8. Add-ons must be compatible with the Kubernetes version
+
+After upgrading the cluster and nodes, you checked the add-ons.
+
+Before:
+kube-proxy
+v1.32.11-eksbuild.5
+
+After:
+v1.33.10-eksbuild.29
+
+You verified compatibility first:
+
+aws eks describe-addon-versions \
+  --kubernetes-version 1.33 \
+  --addon-name kube-proxy
+
+Important lesson
+
+Don't blindly choose an add-on version.
+
+First check:
+Is this add-on version compatible with my Kubernetes version?
+9. kube-proxy
+
+Purpose:
+
+    kube-proxy helps implement Kubernetes Service networking on worker nodes.
+
+You upgraded:
+v1.32.11-eksbuild.5
+          ↓
+v1.33.10-eksbuild.29
+
+Then verified:
+
+kubectl get pods -n kube-system \
+  -l k8s-app=kube-proxy -o wide
+
+and got:
+1/1 Running
+1/1 Running
+10. VPC CNI
+
+Purpose:
+
+    AWS VPC CNI provides networking for Pods using AWS VPC networking.
+
+You upgraded:
+v1.21.1-eksbuild.3
+          ↓
+v1.22.3-eksbuild.1
+
+Then verified:
+
+kubectl get pods -n kube-system \
+  -l k8s-app=aws-node -o wide
+
+and got:
+2/2 Running
+2/2 Running
+
+This is an important verification step.
+11. CoreDNS
+
+You found:
+kube-system   coredns
+
+in the PDB output.
+
+Remember:
+
+    ## CoreDNS provides DNS/service discovery inside the Kubernetes cluster.
+
+For example:
+my-service.default.svc.cluster.local
+
+is resolved through CoreDNS.
+
+Also remember that your:
+
+aws eks list-addons
+
+only showed:
+kube-proxy
+vpc-cni
+
+because CoreDNS wasn't configured as an EKS managed add-on in your cluster.
+12. Important verification commands
+
+These are worth keeping in your notes.
+Check Kubernetes version
+
+kubectl version
+
+Check nodes
+
+kubectl get nodes -o wide
+
+Check Pods
+
+kubectl get pods -A
+
+Check add-ons
+
+aws eks list-addons --cluster-name prod-cluster
+
+Check specific add-on
+
+aws eks describe-addon \
+  --cluster-name prod-cluster \
+  --addon-name kube-proxy
+
+Check PDB
+
+kubectl get pdb -A
+
+Check services
+
+kubectl get svc
+
+Check node-group
+
+aws eks describe-nodegroup \
+  --cluster-name prod-cluster \
+  --nodegroup-name Worker-Node-Group
+
+13. Final production verification
+
+After an EKS upgrade, don't just check:
+Cluster = Active
+
+Check the whole stack:
+Control Plane
+      ↓
+Worker Nodes
+      ↓
+System Pods
+      ↓
+Add-ons
+      ↓
+Application Pods
+      ↓
+Services
+      ↓
+Load Balancer
+      ↓
+Application
+
+For your lab:
+
+kubectl get nodes
+kubectl get pods -A
+kubectl get svc
+
+Then actually access the application.
+14. What happened to application availability?
+
+During your upgrade, you changed the application replica count and the application continued working.
+
+The important interview answer is not:
+
+    "EKS upgrades have no downtime."
+
+Instead say:
+
+    "EKS supports rolling node updates, but application availability depends on workload design, replica count, PodDisruptionBudgets, sufficient node capacity, readiness probes, and proper load balancing."
+
+That's a much stronger answer.
+15. Terraform consideration
+
+One important thing for your lab:
+
+You performed the upgrade through the AWS Console, while your infrastructure is also managed through Terraform.
+
+That means you should eventually make sure Terraform's configuration/state reflects the new desired version.
+
+For example, if Terraform still says:
+cluster_version = "1.32"
+
+but AWS is now:
+1.33
+
+then a future:
+
+terraform plan
+
+may show a difference.
+General rule
+
+    If Terraform is the source of truth, don't permanently make infrastructure changes manually in the AWS Console without reconciling Terraform afterward.
+
+16. Your final architecture after the lab
+                    AWS EKS
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+       Control Plane         Managed Node Group
+           1.33                  1.33.13
+                                  │
+                         ┌────────┴────────┐
+                         │                 │
+                      Node 1            Node 2
+                      1.33.13           1.33.13
+                         │                 │
+                    kube-proxy         kube-proxy
+                    VPC CNI            VPC CNI
+                         │                 │
+                         └────────┬────────┘
+                                  │
+                            Application Pods
+                                  │
+                                  ▼
+                         LoadBalancer Service
+⭐ The 10 things I'd memorize
+
+    Control plane and worker nodes are upgraded separately.
+    Upgrade control plane first.
+    Then upgrade managed node groups.
+    Use rolling updates for safer node replacement.
+    Cordon = stop new Pod scheduling.
+    Drain = move/evict Pods from a node.
+    PDB protects Pod availability, not EC2 nodes.
+    Check add-on compatibility before upgrading.
+    Verify nodes + system Pods + application + LoadBalancer after upgrade.
+    If using Terraform, reconcile manual AWS Console changes with Terraform.
+
+Your completed lab
+EKS 1.32 → 1.33
+        │
+        ├── Control Plane       ✅
+        ├── Node Group          ✅
+        ├── kube-proxy          ✅
+        ├── VPC CNI             ✅
+        ├── Nodes               ✅
+        ├── Pods                ✅
+        └── Application         ✅
+
+             SUCCESS 🎯
+
+This is a solid real-world EKS upgrade scenario to discuss in interviews.
